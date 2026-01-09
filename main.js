@@ -119,6 +119,11 @@ let joystickTouchId = null;
 let joystickCenter = { x: 0, y: 0 };
 let lookTouchId = null;
 let lastLookPos = { x: 0, y: 0 };
+let wSwipeTouchId = null;
+let wSwipeStartY = 0;
+const wSwipeMove = { positive: false, negative: false };
+const wSwipeEdgeRatio = 0.14;
+const wSwipeMinDelta = 10;
 const tempEuler = new Euler(0, 0, 0, "YXZ");
 let autoSprintActive = false;
 const levelBtn = document.getElementById("level-btn");
@@ -329,10 +334,12 @@ function resetStamina() {
 function updateStaminaUI() {
   if (!staminaOverlay || !staminaFill) return;
   const ratio = clamp(stamina / staminaMax, 0, 1);
+  const full = ratio >= 0.999;
   staminaFill.style.width = `${ratio * 100}%`;
   const dimmed = stamina <= 0;
   staminaFill.style.filter = dimmed ? "grayscale(0.7)" : "none";
   staminaOverlay.style.opacity = dimmed ? 0.85 : 1;
+  staminaOverlay.style.display = full ? "none" : "block";
 }
 
 function applyLookDelta(deltaX, deltaY) {
@@ -385,6 +392,23 @@ function updateWOverlay() {
   if (showWOverlay) {
     wOverlay.textContent = `w: ${playerW.toFixed(2)}`;
   }
+}
+
+function setWSwipeDirection(dir) {
+  wSwipeMove.positive = dir > 0;
+  wSwipeMove.negative = dir < 0;
+}
+
+function resetWSwipe() {
+  wSwipeTouchId = null;
+  wSwipeStartY = 0;
+  setWSwipeDirection(0);
+}
+
+function isWSwipeCandidate(touch) {
+  const width = window.innerWidth || document.documentElement.clientWidth || 1;
+  const threshold = width * wSwipeEdgeRatio;
+  return touch.clientX <= threshold || touch.clientX >= width - threshold;
 }
 
 function getInputDirection() {
@@ -638,7 +662,9 @@ function updatePlayer(dt) {
   const next = controls.getObject().position.clone();
   let nextW = playerW;
   const { moveDir, inputX, inputZ } = getInputDirection();
-  const wInput = (fourthMove.positive ? 1 : 0) - (fourthMove.negative ? 1 : 0);
+  const wInput =
+    (fourthMove.positive || wSwipeMove.positive ? 1 : 0) -
+    (fourthMove.negative || wSwipeMove.negative ? 1 : 0);
   const climbSurface = climbHeld ? findClimbableSurface(next, nextW) : null;
   const wantsClimb = Boolean(climbSurface && climbHeld && stamina > 0);
 
@@ -711,7 +737,7 @@ function updatePlayer(dt) {
 
   if (climbing && activeClimbSurface) {
     const climbInput = (moveState.forward ? 1 : 0) - (moveState.backward ? 1 : 0);
-    const climbDir = climbInput;
+    const climbDir = climbInput !== 0 ? climbInput : isMobile ? 1 : 0;
     velocityY = climbDir * climbSpeed;
     clampToClimbSurface(next, activeClimbSurface);
     onGround = false;
@@ -1026,6 +1052,7 @@ function resetTouchMovement() {
   touchMove.z = 0;
   joystickTouchId = null;
   climbHeld = false;
+  resetWSwipe();
   if (autoSprintActive) {
     releaseSprint({ allowDash: false });
   }
@@ -1112,6 +1139,7 @@ function setupLookControls() {
   const onStart = (event) => {
     if (!playing) return;
     const touch = Array.from(event.changedTouches).find((t) => {
+      if (isWSwipeCandidate(t)) return false;
       if (touchHitsElement(t, mobilePauseBtn)) return false;
       if (touchHitsElement(t, mobileActions)) return false;
       return true;
@@ -1145,6 +1173,52 @@ function setupLookControls() {
   lookZone.addEventListener("touchmove", onMove, { passive: false });
   lookZone.addEventListener("touchend", onEnd);
   lookZone.addEventListener("touchcancel", onEnd);
+}
+
+function setupWSwipeControls() {
+  if (!isMobile) return;
+  const onStart = (event) => {
+    if (!playing || wSwipeTouchId !== null) return;
+    const width = window.innerWidth || document.documentElement.clientWidth || 1;
+    const touch = Array.from(event.changedTouches).find((t) => {
+      if (!isWSwipeCandidate(t)) return false;
+      if (touchHitsElement(t, joystick)) return false;
+      if (touchHitsElement(t, mobileActions)) return false;
+      if (touchHitsElement(t, mobilePauseBtn)) return false;
+      return true;
+    });
+    if (!touch) return;
+    wSwipeTouchId = touch.identifier;
+    wSwipeStartY = touch.clientY;
+    setWSwipeDirection(0);
+    event.preventDefault();
+  };
+
+  const onMove = (event) => {
+    if (wSwipeTouchId === null) return;
+    const touch = Array.from(event.changedTouches).find((t) => t.identifier === wSwipeTouchId);
+    if (!touch) return;
+    const dy = touch.clientY - wSwipeStartY;
+    let dir = 0;
+    if (Math.abs(dy) >= wSwipeMinDelta) {
+      dir = dy < 0 ? 1 : -1;
+    }
+    setWSwipeDirection(dir);
+    event.preventDefault();
+  };
+
+  const onEnd = (event) => {
+    if (wSwipeTouchId === null) return;
+    const ended = Array.from(event.changedTouches).some((t) => t.identifier === wSwipeTouchId);
+    if (ended) {
+      resetWSwipe();
+    }
+  };
+
+  window.addEventListener("touchstart", onStart, { passive: false });
+  window.addEventListener("touchmove", onMove, { passive: false });
+  window.addEventListener("touchend", onEnd);
+  window.addEventListener("touchcancel", onEnd);
 }
 
 function setupMobileButtons() {
@@ -1205,6 +1279,7 @@ function initMobileControls() {
   if (!isMobile) return;
   setupJoystickControls();
   setupLookControls();
+  setupWSwipeControls();
   setupMobileButtons();
   updateMobileControlsVisibility();
   updateOrientationOverlay();
