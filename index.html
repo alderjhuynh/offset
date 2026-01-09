@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Offset 3D Demo</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.164.1/build/three.module.js",
+        "three/": "https://unpkg.com/three@0.164.1/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="ui">
+    <div id="title-menu" class="panel visible">
+      <h1>Offset</h1>
+      <p class="subtitle">this is supposed to be a proof of concept</p>
+      <div class="buttons">
+        <button id="title-level-btn">Level Select</button>
+      </div>
+      <p class="hint">like, hopefully this isn't the final project</p>
+    </div>
+
+    <div id="main-menu" class="panel">
+      <h2>Paused</h2>
+      <div class="buttons">
+        <button id="level-btn">Level Select</button>
+        <button id="resume-btn" class="ghost">Resume</button>
+        <button id="quit-btn" class="ghost">Quit to Menu</button>
+      </div>
+    </div>
+
+    <div id="level-menu" class="panel">
+      <h2>Select Level</h2>
+      <div class="buttons" id="level-options"></div>
+      <div class="buttons">
+        <button id="back-btn" class="ghost">Back</button>
+      </div>
+    </div>
+
+  </div>
+
+  <canvas id="scene"></canvas>
+  <div id="mobile-controls" class="hidden">
+    <div id="joystick">
+      <div id="joystick-handle"></div>
+    </div>
+    <div id="mobile-actions">
+      <button id="mobile-climb" class="mobile-btn">Climb</button>
+      <button id="mobile-dash" class="mobile-btn">Dash</button>
+      <button id="mobile-jump" class="mobile-btn">Jump</button>
+      <button id="mobile-pause" class="mobile-btn ghost">Pause</button>
+    </div>
+    <div id="look-zone"></div>
+  </div>
+  <div id="orientation-overlay" class="hidden">
+    <div class="orientation-card">
+      <p>Rotate your device to landscape to play.</p>
+    </div>
+  </div>
+  <div id="stamina-overlay" class="status-overlay">
+    <div class="stamina-label">Stamina</div>
+    <div class="stamina-bar">
+      <div id="stamina-fill"></div>
+    </div>
+  </div>
+  <div id="w-overlay" class="hidden"></div>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
