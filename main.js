@@ -6,6 +6,9 @@ import {
   Color,
   Euler,
   DirectionalLight,
+  EdgesGeometry,
+  LineBasicMaterial,
+  LineSegments,
   Mesh,
   MeshStandardMaterial,
   MathUtils,
@@ -17,11 +20,51 @@ import {
 } from "three";
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
 import { levelMap, levelsList } from "./levels/index.js";
+import { PlayerController } from "./player.js";
 
 const SAVE_KEY = "offset-save";
+const SETTINGS_KEY = "offset-settings";
 const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
 const isMobile =
   isTouchDevice || /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+const defaultSettings = {
+  sensitivity: 1,
+  keybinds: {
+    forward: ["KeyW"],
+    backward: ["KeyS"],
+    left: ["KeyA"],
+    right: ["KeyD"],
+    climb: ["KeyE"],
+    jump: ["Space"],
+    sprint: ["ShiftLeft", "ShiftRight"],
+    wPositive: ["ArrowUp", "ArrowRight"],
+    wNegative: ["ArrowDown", "ArrowLeft"],
+    toggleWOverlay: ["KeyV"]
+  },
+  mobileLayout: {
+    joystick: { x: 0, y: 0 },
+    actions: { x: 0, y: 0 },
+    jump: { x: 0, y: 0 },
+    dash: { x: 0, y: 0 },
+    climb: { x: 0, y: 0 },
+    pause: { x: 0, y: 0 },
+    look: { x: 0, y: 0 }
+  }
+};
+
+function cloneSettings(data) {
+  if (typeof structuredClone === "function") {
+    return structuredClone(data);
+  }
+  return JSON.parse(JSON.stringify(data));
+}
+
+let settings = cloneSettings(defaultSettings);
+let settingsDraft = cloneSettings(defaultSettings);
+let awaitingBindAction = null;
+let awaitingBindBtn = null;
+let sensitivityMultiplier = 1;
 
 const canvas = document.getElementById("scene");
 const renderer = new WebGLRenderer({ canvas, antialias: true });
@@ -46,91 +89,49 @@ camera.rotation.order = "YXZ";
 const controls = new PointerLockControls(camera, renderer.domElement);
 scene.add(controls.getObject());
 
+const player = new PlayerController({ controls, isMobile });
 const clock = new Clock();
-const moveState = { forward: false, backward: false, left: false, right: false };
-const touchMove = { x: 0, z: 0 };
-const fourthMove = { positive: false, negative: false };
-let velocityY = 0;
-let fourthVelocity = 0;
-let playerW = 0;
-let onGround = true;
-const gravity = -28;
-const jumpStrength = 9;
-const eyeHeight = 1.6;
-const playerRadius = 0.3;
-const hitboxOffset = new Vector3(0, playerRadius - eyeHeight, 0);
-const stepHeight = 0.35;
-const groundFriction = 8;
-const airFriction = 4.5;
-const standClearance = 0.02;
-const groundSnap = 0.5;
-const groundTolerance = 0.4;
-const baseGroundY = 0;
-const climbSpeed = 6;
-const climbAttachDistance = playerRadius + 0.25;
-const moveVelocity = new Vector3(0, 0, 0);
-const moveAcceleration = 22;
-const maxMoveSpeed = 20;
-const fourthMoveAcceleration = 22;
-const maxFourthMoveSpeed = 20;
-const sprintSpeedMultiplier = 2;
-const sprintAccelMultiplier = 1.8;
-const dashSpeed = 16;
-const dashDuration = 0.1;
-const dashCooldown = 0.6;
-const dashStaminaCost = 25;
-const dashTapThreshold = 180;
-const climbDashVerticalBoost = 6.5;
-const wallJumpUpStrength = 9;
-const wallJumpPushStrength = 9;
-const wallJumpCooldown = 0.25;
-const staminaMax = 100;
-const staminaRegenRate = 26;
-const staminaRegenDelay = 0.6;
-const sprintStaminaRate = 16;
-const climbStaminaRate = 32;
-const defaultSpawn = new Vector3(0, 1.6, -8);
+const defaultSpawn = { position: new Vector3(0, 1.6, -8), rotationY: Math.PI };
 const obstacles = [];
 let playing = false;
 let currentLevel = null;
 let levelMenuReturn = "title-menu";
+let settingsMenuReturn = "title-menu";
 let activePanel = "title-menu";
 let panoramaActive = false;
 let panoramaAngle = 0;
 const panoramaRadius = 10;
 const panoramaSpinSpeed = 0.18;
-const panoramaCenter = new Vector3(0, eyeHeight, 0);
-let sprinting = false;
-let climbing = false;
-let climbHeld = false;
-let shiftHeld = false;
-let shiftDownTime = 0;
-let dashTimeRemaining = 0;
-let dashCooldownRemaining = 0;
-let stamina = staminaMax;
-let staminaRegenCooldown = 0;
-let staminaUsedThisFrame = false;
-let staminaDirty = true;
-let wallJumpCooldownRemaining = 0;
-const dashVector = new Vector3();
+const panoramaCenter = new Vector3(0, 1.6, 0);
 const joystickMaxDistance = 60;
-const mobileLookSensitivity = 0.0032;
+const baseLookSensitivity = 0.0032;
+let lookSensitivity = baseLookSensitivity;
 let joystickTouchId = null;
 let joystickCenter = { x: 0, y: 0 };
 let lookTouchId = null;
 let lastLookPos = { x: 0, y: 0 };
 let wSwipeTouchId = null;
 let wSwipeStartY = 0;
-const wSwipeMove = { positive: false, negative: false };
 const wSwipeEdgeRatio = 0.14;
 const wSwipeMinDelta = 10;
 const tempEuler = new Euler(0, 0, 0, "YXZ");
-let autoSprintActive = false;
 const levelBtn = document.getElementById("level-btn");
 const backBtn = document.getElementById("back-btn");
 const resumeBtn = document.getElementById("resume-btn");
 const quitBtn = document.getElementById("quit-btn");
 const titleLevelBtn = document.getElementById("title-level-btn");
+const titleSettingsBtn = document.getElementById("title-settings-btn");
+const settingsBtn = document.getElementById("settings-btn");
+const settingsPanel = document.getElementById("settings-menu");
+const settingsBackBtn = document.getElementById("settings-back-btn");
+const settingsSaveBtn = document.getElementById("settings-save-btn");
+const settingsResetBtn = document.getElementById("settings-reset-btn");
+const sensitivitySlider = document.getElementById("sensitivity-slider");
+const sensitivityValue = document.getElementById("sensitivity-value");
+const desktopKeybinds = document.getElementById("desktop-keybinds");
+const keybindList = document.getElementById("keybind-list");
+const mobileLayoutSettings = document.getElementById("mobile-layout");
+const layoutList = document.getElementById("layout-list");
 const levelOptions = document.getElementById("level-options");
 const mobileControls = document.getElementById("mobile-controls");
 const joystick = document.getElementById("joystick");
@@ -150,6 +151,12 @@ let showWOverlay = false;
 const floorMaterial = new MeshStandardMaterial({ color: "#1f2937" });
 const obstacleMaterial = new MeshStandardMaterial({ color: "#d1b9eb" });
 const climbableColor = "#34d399";
+const outlineBaseMaterial = new LineBasicMaterial({
+  color: "#cbd5e1",
+  transparent: true,
+  opacity: 0.65,
+  depthWrite: false
+});
 const invisibleMaterial = new MeshStandardMaterial({
   visible: false,
   transparent: true,
@@ -185,15 +192,24 @@ function createBoxObstacle(
   if (climbable && visible) {
     mat.color.set(climbableColor);
   }
-  const mesh = new Mesh(new BoxGeometry(width, height, depth), mat);
+  const geometry = new BoxGeometry(width, height, depth);
+  const mesh = new Mesh(geometry, mat);
   mesh.visible = visible;
   mesh.position.set(x, y + height / 2, z);
   scene.add(mesh);
+  let outline = null;
+  if (visible) {
+    const edges = new EdgesGeometry(geometry);
+    const outlineMaterial = outlineBaseMaterial.clone();
+    outline = new LineSegments(edges, outlineMaterial);
+    outline.position.copy(mesh.position);
+    scene.add(outline);
+  }
   const box = new Box3().setFromObject(mesh);
   const resolvedWSize = wSize == null ? Math.max(width, height, depth) : wSize;
   const wHalf = Number.isFinite(resolvedWSize) ? resolvedWSize / 2 : Infinity;
   const baseColor = mat.color.clone();
-  obstacles.push({ mesh, box, wCenter, wHalf, baseColor, climbable });
+  obstacles.push({ mesh, box, wCenter, wHalf, baseColor, climbable, outline });
 }
 
 function createObstacle(x, y, z, size, options = {}) {
@@ -201,7 +217,10 @@ function createObstacle(x, y, z, size, options = {}) {
 }
 
 function clearObstacles() {
-  obstacles.forEach(({ mesh }) => scene.remove(mesh));
+  obstacles.forEach(({ mesh, outline }) => {
+    if (mesh) scene.remove(mesh);
+    if (outline) scene.remove(outline);
+  });
   obstacles.length = 0;
 }
 
@@ -259,6 +278,28 @@ function createBounds(halfSize = 39, height = 8, thickness = 1) {
   );
 }
 
+function getSpawnConfig(level) {
+  const fallbackRotation = defaultSpawn.rotationY;
+  if (!level || !level.spawn) {
+    return { position: defaultSpawn.position.clone(), rotationY: fallbackRotation };
+  }
+  const raw = level.spawn;
+  if (raw instanceof Vector3) {
+    const rotationY =
+      typeof level.spawnRotation === "number" ? level.spawnRotation : fallbackRotation;
+    return { position: raw.clone(), rotationY };
+  }
+  const position =
+    raw.position && raw.position instanceof Vector3 ? raw.position.clone() : defaultSpawn.position.clone();
+  const rotationY =
+    typeof raw.rotationY === "number"
+      ? raw.rotationY
+      : typeof level.spawnRotation === "number"
+      ? level.spawnRotation
+      : fallbackRotation;
+  return { position, rotationY };
+}
+
 function loadLevel(levelId) {
   const level = levelMap[levelId];
   if (!level) return null;
@@ -270,12 +311,13 @@ function loadLevel(levelId) {
 
 function enterTitleScreen() {
   const pano = loadLevel("panorama");
-  const spawn = pano && pano.spawn ? pano.spawn.clone() : defaultSpawn.clone();
-  resetPlayer(spawn);
+  const spawnCfg = getSpawnConfig(pano);
+  resetPlayer(spawnCfg.position, spawnCfg.rotationY);
   panoramaActive = true;
   panoramaAngle = 0;
   playing = false;
-  moveState.forward = moveState.backward = moveState.left = moveState.right = false;
+  player.playing = false;
+  player.resetInputs();
   resetFourthMovement();
   controls.unlock();
   showPanel("title-menu");
@@ -288,55 +330,295 @@ function clamp(val, min, max) {
   return Math.max(min, Math.min(max, val));
 }
 
-function spendStamina(amount) {
-  if (amount <= 0) return true;
-  if (stamina < amount) return false;
-  stamina -= amount;
-  staminaRegenCooldown = staminaRegenDelay;
-  staminaDirty = true;
-  staminaUsedThisFrame = true;
+function mergeSettings(raw) {
+  const merged = cloneSettings(defaultSettings);
+  if (!raw || typeof raw !== "object") return merged;
+  if (typeof raw.sensitivity === "number" && Number.isFinite(raw.sensitivity)) {
+    merged.sensitivity = clamp(raw.sensitivity, 0.4, 2.4);
+  }
+  if (raw.keybinds && typeof raw.keybinds === "object") {
+    for (const key of Object.keys(defaultSettings.keybinds)) {
+      const value = raw.keybinds[key];
+      if (Array.isArray(value) && value.every((v) => typeof v === "string")) {
+        merged.keybinds[key] = [...value];
+      }
+    }
+  }
+  if (raw.mobileLayout && typeof raw.mobileLayout === "object") {
+    for (const key of Object.keys(defaultSettings.mobileLayout)) {
+      const pos = raw.mobileLayout[key];
+      if (pos && typeof pos.x === "number" && typeof pos.y === "number") {
+        merged.mobileLayout[key] = { x: pos.x, y: pos.y };
+      }
+    }
+  }
+  return merged;
+}
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return cloneSettings(defaultSettings);
+    const parsed = JSON.parse(raw);
+    return mergeSettings(parsed);
+  } catch (err) {
+    console.warn("Failed to load settings", err);
+    return cloneSettings(defaultSettings);
+  }
+}
+
+function saveSettings(data) {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
+  } catch (err) {
+    console.warn("Failed to save settings", err);
+  }
+}
+
+function applySensitivity(multiplier) {
+  sensitivityMultiplier = clamp(multiplier, 0.4, 2.4);
+  lookSensitivity = baseLookSensitivity * sensitivityMultiplier;
+  controls.pointerSpeed = sensitivityMultiplier;
+  const slider = document.getElementById("sensitivity-slider");
+  const valueLabel = document.getElementById("sensitivity-value");
+  if (slider) {
+    slider.value = String(sensitivityMultiplier);
+  }
+  if (valueLabel) {
+    valueLabel.textContent = `${sensitivityMultiplier.toFixed(2)}x`;
+  }
+}
+
+function applyMobileLayout(layout) {
+  const targets = {
+    joystick,
+    actions: mobileActions,
+    jump: mobileJumpBtn,
+    dash: mobileDashBtn,
+    climb: mobileClimbBtn,
+    pause: mobilePauseBtn,
+    look: lookZone
+  };
+  Object.entries(targets).forEach(([key, element]) => {
+    if (!element) return;
+    const pos = layout && layout[key] ? layout[key] : defaultSettings.mobileLayout[key];
+    const x = pos?.x || 0;
+    const y = pos?.y || 0;
+    element.style.setProperty("--offset-x", `${x}px`);
+    element.style.setProperty("--offset-y", `${y}px`);
+  });
+}
+
+function formatKeyCode(code) {
+  if (!code) return "Unbound";
+  if (code.startsWith("Key")) return code.replace("Key", "");
+  if (code.startsWith("Digit")) return code.replace("Digit", "");
+  switch (code) {
+    case "Space":
+      return "Space";
+    case "ShiftLeft":
+    case "ShiftRight":
+      return "Shift";
+    case "ArrowUp":
+      return "Arrow Up";
+    case "ArrowDown":
+      return "Arrow Down";
+    case "ArrowLeft":
+      return "Arrow Left";
+    case "ArrowRight":
+      return "Arrow Right";
+    default:
+      return code;
+  }
+}
+
+function formatKeyList(list) {
+  if (!Array.isArray(list) || list.length === 0) return "Unbound";
+  return list.map(formatKeyCode).join(" / ");
+}
+
+const keybindActions = [
+  { id: "forward", label: "Move Forward" },
+  { id: "backward", label: "Move Backward" },
+  { id: "left", label: "Move Left" },
+  { id: "right", label: "Move Right" },
+  { id: "jump", label: "Jump" },
+  { id: "climb", label: "Climb" },
+  { id: "sprint", label: "Sprint / Dash" },
+  { id: "wPositive", label: "w+" },
+  { id: "wNegative", label: "w-" },
+  { id: "toggleWOverlay", label: "Toggle w overlay" }
+];
+
+function isKeyForAction(action, code) {
+  const list = settings.keybinds[action] || [];
+  return list.includes(code);
+}
+
+function setKeybind(action, code) {
+  settingsDraft.keybinds[action] = code ? [code] : [];
+  if (awaitingBindBtn) {
+    awaitingBindBtn.textContent = formatKeyList(settingsDraft.keybinds[action]);
+  }
+}
+
+function renderKeybindList() {
+  if (!keybindList) return;
+  keybindList.innerHTML = "";
+  keybindActions.forEach((action) => {
+    const row = document.createElement("div");
+    row.className = "setting-row";
+
+    const label = document.createElement("div");
+    label.className = "label";
+    label.textContent = action.label;
+
+    const btn = document.createElement("button");
+    btn.className = "keybind-btn";
+    btn.textContent = formatKeyList(settingsDraft.keybinds[action.id]);
+    btn.addEventListener("click", (event) => {
+      event.preventDefault();
+      awaitingBindAction = action.id;
+      awaitingBindBtn = btn;
+      btn.textContent = "Press any key...";
+    });
+
+    row.appendChild(label);
+    row.appendChild(btn);
+    keybindList.appendChild(row);
+  });
+}
+
+const mobileLayoutDescriptors = [
+  { id: "joystick", label: "Joystick" },
+  { id: "actions", label: "Action Cluster" },
+  { id: "jump", label: "Jump Button" },
+  { id: "dash", label: "Dash Button" },
+  { id: "climb", label: "Climb Button" },
+  { id: "pause", label: "Pause Button" },
+  { id: "look", label: "Look Zone" }
+];
+
+function renderMobileLayoutControls() {
+  if (!layoutList) return;
+  layoutList.innerHTML = "";
+  mobileLayoutDescriptors.forEach((item) => {
+    const position = settingsDraft.mobileLayout[item.id] || { x: 0, y: 0 };
+    settingsDraft.mobileLayout[item.id] = position;
+    const row = document.createElement("div");
+    row.className = "setting-row";
+    const label = document.createElement("div");
+    label.className = "label";
+    label.textContent = item.label;
+
+    const controls = document.createElement("div");
+    controls.className = "layout-controls";
+
+    const xInput = document.createElement("input");
+    xInput.type = "number";
+    xInput.value = position.x ?? 0;
+    xInput.title = "Horizontal offset in px";
+    xInput.placeholder = "x";
+    xInput.setAttribute("aria-label", `${item.label} horizontal offset`);
+    xInput.addEventListener("input", () => {
+      const value = Number.parseFloat(xInput.value) || 0;
+      settingsDraft.mobileLayout[item.id].x = value;
+      applyMobileLayout(settingsDraft.mobileLayout);
+    });
+
+    const yInput = document.createElement("input");
+    yInput.type = "number";
+    yInput.value = position.y ?? 0;
+    yInput.title = "Vertical offset in px";
+    yInput.placeholder = "y";
+    yInput.setAttribute("aria-label", `${item.label} vertical offset`);
+    yInput.addEventListener("input", () => {
+      const value = Number.parseFloat(yInput.value) || 0;
+      settingsDraft.mobileLayout[item.id].y = value;
+      applyMobileLayout(settingsDraft.mobileLayout);
+    });
+
+    controls.appendChild(xInput);
+    controls.appendChild(yInput);
+    row.appendChild(label);
+    row.appendChild(controls);
+    layoutList.appendChild(row);
+  });
+}
+
+function syncSettingsVisibility() {
+  if (!settingsPanel) return;
+  const showDesktop = !isMobile && desktopKeybinds;
+  const showMobile = isMobile && mobileLayoutSettings;
+  if (desktopKeybinds) desktopKeybinds.classList.toggle("hidden", !showDesktop);
+  if (mobileLayoutSettings) mobileLayoutSettings.classList.toggle("hidden", !showMobile);
+}
+
+function syncSettingsUI() {
+  settingsDraft = cloneSettings(settings);
+  awaitingBindAction = null;
+  awaitingBindBtn = null;
+  if (sensitivitySlider) {
+    sensitivitySlider.value = String(settingsDraft.sensitivity);
+  }
+  if (sensitivityValue) {
+    sensitivityValue.textContent = `${settingsDraft.sensitivity.toFixed(2)}x`;
+  }
+  syncSettingsVisibility();
+  renderKeybindList();
+  renderMobileLayoutControls();
+  applyMobileLayout(settingsDraft.mobileLayout);
+  applySensitivity(settingsDraft.sensitivity);
+}
+
+function commitSettings() {
+  settings = cloneSettings(settingsDraft);
+  saveSettings(settings);
+  applyMobileLayout(settings.mobileLayout);
+  applySensitivity(settings.sensitivity);
+}
+
+function resetSettingsToDefault() {
+  settingsDraft = cloneSettings(defaultSettings);
+  syncSettingsUI();
+}
+
+function handlePendingRebind(event) {
+  if (!awaitingBindAction) return false;
+  event.preventDefault();
+  if (event.code === "Escape") {
+    setKeybind(awaitingBindAction, null);
+  } else {
+    setKeybind(awaitingBindAction, event.code);
+  }
+  awaitingBindAction = null;
+  awaitingBindBtn = null;
   return true;
 }
 
-function drainStamina(rate, dt) {
-  if (rate <= 0) return;
-  const before = stamina;
-  stamina = Math.max(0, stamina - rate * dt);
-  if (stamina !== before) {
-    staminaRegenCooldown = staminaRegenDelay;
-    staminaDirty = true;
-    staminaUsedThisFrame = true;
-  }
+function openSettings(returnTo = "title-menu") {
+  settingsMenuReturn = returnTo;
+  syncSettingsUI();
+  showPanel("settings-menu");
 }
 
-function regenerateStamina(dt) {
-  if (staminaUsedThisFrame) {
-    staminaUsedThisFrame = false;
-    return;
+function closeSettings(save = false) {
+  if (save) {
+    commitSettings();
+  } else {
+    settingsDraft = cloneSettings(settings);
+    applyMobileLayout(settings.mobileLayout);
+    applySensitivity(settings.sensitivity);
   }
-  if (staminaRegenCooldown > 0) {
-    staminaRegenCooldown = Math.max(0, staminaRegenCooldown - dt);
-    return;
-  }
-  const before = stamina;
-  stamina = Math.min(staminaMax, stamina + staminaRegenRate * dt);
-  if (before !== stamina) {
-    staminaDirty = true;
-  }
-}
-
-function resetStamina() {
-  stamina = staminaMax;
-  staminaRegenCooldown = 0;
-  staminaDirty = true;
+  showPanel(settingsMenuReturn);
 }
 
 function updateStaminaUI() {
   if (!staminaOverlay || !staminaFill) return;
-  const ratio = clamp(stamina / staminaMax, 0, 1);
+  const ratio = clamp(player.getStaminaRatio(), 0, 1);
   const full = ratio >= 0.999;
   staminaFill.style.width = `${ratio * 100}%`;
-  const dimmed = stamina <= 0;
+  const dimmed = ratio <= 0;
   staminaFill.style.filter = dimmed ? "grayscale(0.7)" : "none";
   staminaOverlay.style.opacity = dimmed ? 0.85 : 1;
   staminaOverlay.style.display = full ? "none" : "block";
@@ -346,8 +628,8 @@ function applyLookDelta(deltaX, deltaY) {
   // Clamp yaw/pitch and zero roll so mobile users cannot tilt the camera sideways.
   tempEuler.setFromQuaternion(controls.getObject().quaternion, "YXZ");
   const target = tempEuler;
-  target.y -= deltaX * mobileLookSensitivity;
-  target.x = clamp(target.x - deltaY * mobileLookSensitivity, -Math.PI / 2, Math.PI / 2);
+  target.y -= deltaX * lookSensitivity;
+  target.x = clamp(target.x - deltaY * lookSensitivity, -Math.PI / 2, Math.PI / 2);
   target.z = 0;
   controls.getObject().quaternion.setFromEuler(target);
 }
@@ -360,22 +642,30 @@ function enforceZeroRoll() {
   }
 }
 
-function updateObstacleVisuals(wPos = playerW) {
-  const fadeBuffer = playerRadius * 2;
+function updateObstacleVisuals(wPos = player.getPlayerW()) {
+  const fadeBuffer = player.playerRadius * 2;
   for (const obstacle of obstacles) {
-    const { mesh, wCenter = 0, wHalf = Infinity, baseColor } = obstacle;
+    const { mesh, outline, wCenter = 0, wHalf = Infinity, baseColor } = obstacle;
     if (!mesh || !mesh.visible) continue;
     const mat = mesh.material;
     if (!Number.isFinite(wHalf)) {
       mat.opacity = 1;
       if (baseColor) mat.color.copy(baseColor);
+      if (outline) {
+        outline.visible = true;
+        outline.material.opacity = 1;
+      }
       continue;
     }
     const dist = Math.abs(wPos - wCenter);
-    const overlap = wHalf + playerRadius - dist;
-    const delta = Math.max(0, dist - (wHalf + playerRadius));
+    const overlap = wHalf + player.playerRadius - dist;
+    const delta = Math.max(0, dist - (wHalf + player.playerRadius));
     const t = clamp(1 - delta / Math.max(1, wHalf + fadeBuffer), 0.15, 1);
     mat.opacity = t;
+    if (outline) {
+      outline.visible = true;
+      outline.material.opacity = t;
+    }
     if (baseColor) {
       if (overlap >= 0) {
         mat.color.set("#791a56ff");
@@ -390,13 +680,15 @@ function updateWOverlay() {
   if (!wOverlay) return;
   wOverlay.className = showWOverlay ? "status-overlay" : "hidden";
   if (showWOverlay) {
-    wOverlay.textContent = `w: ${playerW.toFixed(2)}`;
+    wOverlay.textContent = `w: ${player.getPlayerW().toFixed(2)}`;
   }
 }
 
 function setWSwipeDirection(dir) {
-  wSwipeMove.positive = dir > 0;
-  wSwipeMove.negative = dir < 0;
+  player.setWSwipeDirection(dir);
+  // Mirror swipe into fourth-move flags so w-shift responds immediately on mobile.
+  player.setFourthMove("positive", dir > 0);
+  player.setFourthMove("negative", dir < 0);
 }
 
 function resetWSwipe() {
@@ -411,418 +703,9 @@ function isWSwipeCandidate(touch) {
   return touch.clientX <= threshold || touch.clientX >= width - threshold;
 }
 
-function getInputDirection() {
-  const forward = new Vector3();
-  controls.getDirection(forward);
-  forward.y = 0;
-  if (forward.lengthSq() > 0) forward.normalize();
-  const right = new Vector3().crossVectors(forward, new Vector3(0, 1, 0)).normalize();
-  const keyboardX = (moveState.right ? 1 : 0) - (moveState.left ? 1 : 0);
-  const keyboardZ = (moveState.forward ? 1 : 0) - (moveState.backward ? 1 : 0);
-  let inputX = keyboardX + touchMove.x;
-  let inputZ = keyboardZ + touchMove.z;
-  const magnitude = Math.hypot(inputX, inputZ);
-  if (magnitude > 1) {
-    inputX /= magnitude;
-    inputZ /= magnitude;
-  }
-  const moveDir = forward.clone().multiplyScalar(inputZ).add(right.clone().multiplyScalar(inputX));
-  if (moveDir.lengthSq() === 0 && forward.lengthSq() > 0) {
-    moveDir.copy(forward);
-  } else if (moveDir.lengthSq() > 0) {
-    moveDir.normalize();
-  }
-  return { moveDir, inputX, inputZ, forward, right };
-}
-
-function collides(target, radius = playerRadius, wPos = playerW) {
-  const center = target.clone().add(hitboxOffset);
-  for (const obstacle of obstacles) {
-    const { box, wCenter = 0, wHalf = Infinity } = obstacle;
-    if (Number.isFinite(wHalf) && Math.abs(wPos - wCenter) > wHalf + radius) continue;
-    const maxY = Math.max(box.min.y, box.max.y - standClearance);
-    const closest = new Vector3(
-      clamp(center.x, box.min.x, box.max.x),
-      clamp(center.y, box.min.y, maxY),
-      clamp(center.z, box.min.z, box.max.z)
-    );
-    const distSq = closest.distanceToSquared(center);
-    if (distSq < radius * radius) return true;
-  }
-  return false;
-}
-
-function findClimbableSurface(pos, wPos = playerW) {
-  const center = pos.clone().add(hitboxOffset);
-  const feetY = pos.y - eyeHeight;
-  let best = null;
-  for (const obstacle of obstacles) {
-    if (!obstacle.climbable) continue;
-    const { box, wCenter = 0, wHalf = Infinity } = obstacle;
-    if (Number.isFinite(wHalf) && Math.abs(wPos - wCenter) > wHalf + playerRadius) continue;
-    const onTop = feetY >= box.max.y - 0.05;
-    if (onTop) continue;
-    const withinY = center.y >= box.min.y - 0.4 && center.y <= box.max.y + eyeHeight;
-    const withinX = center.x >= box.min.x - playerRadius && center.x <= box.max.x + playerRadius;
-    const withinZ = center.z >= box.min.z - playerRadius && center.z <= box.max.z + playerRadius;
-    if (!withinY || (!withinX && !withinZ)) continue;
-
-    const candidates = [];
-    if (withinZ) {
-      candidates.push({ dist: Math.abs(center.x - box.min.x), normal: new Vector3(-1, 0, 0), face: "xMin" });
-      candidates.push({ dist: Math.abs(center.x - box.max.x), normal: new Vector3(1, 0, 0), face: "xMax" });
-    }
-    if (withinX) {
-      candidates.push({ dist: Math.abs(center.z - box.min.z), normal: new Vector3(0, 0, -1), face: "zMin" });
-      candidates.push({ dist: Math.abs(center.z - box.max.z), normal: new Vector3(0, 0, 1), face: "zMax" });
-    }
-
-    for (const candidate of candidates) {
-      if (candidate.dist <= climbAttachDistance + 0.05) {
-        if (!best || candidate.dist < best.dist) {
-          best = { ...candidate, obstacle, box };
-        }
-      }
-    }
-  }
-  return best && best.dist <= climbAttachDistance ? best : null;
-}
-
-function clampToClimbSurface(pos, surface) {
-  if (!surface) return;
-  const center = pos.clone().add(hitboxOffset);
-  const { box, face } = surface;
-  const epsilon = 0.01;
-  // Prevent nudging while above the top surface to avoid jitter when standing on top.
-  const feetY = pos.y - eyeHeight;
-  if (feetY >= box.max.y - 0.05) return;
-  switch (face) {
-    case "xMin":
-      if (box.min.x - center.x < playerRadius) {
-        center.x = box.min.x - playerRadius - epsilon;
-      }
-      break;
-    case "xMax":
-      if (center.x - box.max.x < playerRadius) {
-        center.x = box.max.x + playerRadius + epsilon;
-      }
-      break;
-    case "zMin":
-      if (box.min.z - center.z < playerRadius) {
-        center.z = box.min.z - playerRadius - epsilon;
-      }
-      break;
-    case "zMax":
-      if (center.z - box.max.z < playerRadius) {
-        center.z = box.max.z + playerRadius + epsilon;
-      }
-      break;
-    default:
-      break;
-  }
-  pos.copy(center.sub(hitboxOffset));
-}
-
-function attemptJump() {
-  if (!playing) return;
-  if (onGround) {
-    velocityY = jumpStrength;
-    onGround = false;
-    return;
-  }
-  if (wallJumpCooldownRemaining > 0) return;
-  const surface = findClimbableSurface(controls.getObject().position, playerW);
-  if (surface) {
-    const push = surface.normal.clone().multiplyScalar(wallJumpPushStrength);
-    moveVelocity.add(new Vector3(push.x, 0, push.z));
-    velocityY = wallJumpUpStrength;
-    onGround = false;
-    climbing = false;
-    climbHeld = false;
-    wallJumpCooldownRemaining = wallJumpCooldown;
-  }
-}
-
-function surfaceHeightAt(x, z, radius = playerRadius, wPos = playerW) {
-  let highest = 0;
-  for (const { box, wCenter = 0, wHalf = Infinity } of obstacles) {
-    if (Number.isFinite(wHalf) && Math.abs(wPos - wCenter) > wHalf + radius) continue;
-    const withinX = x + radius >= box.min.x && x - radius <= box.max.x;
-    const withinZ = z + radius >= box.min.z && z - radius <= box.max.z;
-    if (withinX && withinZ) {
-      highest = Math.max(highest, box.max.y);
-    }
-  }
-  return highest;
-}
-
-function resolvePenetration(pos, wPos = playerW) {
-  let overlapped = false;
-  for (let pass = 0; pass < 3; pass++) {
-    let adjusted = false;
-    for (const { box, wCenter = 0, wHalf = Infinity } of obstacles) {
-      if (Number.isFinite(wHalf) && Math.abs(wPos - wCenter) > wHalf + playerRadius) continue;
-      const center = pos.clone().add(hitboxOffset);
-      const maxY = Math.max(box.min.y, box.max.y - standClearance);
-      const closest = new Vector3(
-        clamp(center.x, box.min.x, box.max.x),
-        clamp(center.y, box.min.y, maxY),
-        clamp(center.z, box.min.z, box.max.z)
-      );
-      const diff = center.sub(closest);
-      const distSq = diff.lengthSq();
-      if (distSq < playerRadius * playerRadius) {
-        const feetY = center.y - playerRadius;
-        const nearTop = feetY >= box.max.y - standClearance && feetY <= box.max.y + standClearance;
-        if (nearTop) {
-          const desiredCenterY = box.max.y + playerRadius + standClearance;
-          const deltaY = desiredCenterY - center.y;
-          if (deltaY > 0) {
-            pos.y += deltaY;
-          }
-          velocityY = Math.max(0, velocityY);
-          overlapped = true;
-          adjusted = true;
-          continue;
-        }
-        overlapped = true;
-        const dist = Math.sqrt(distSq) || 0.0001;
-        const push = diff.multiplyScalar((playerRadius - dist) / dist);
-        pos.add(push);
-        adjusted = true;
-        if (push.y > 0) {
-          velocityY = Math.max(0, velocityY);
-        }
-      }
-    }
-    if (!adjusted) break;
-  }
-  return overlapped;
-}
-
-function tryStepUp(pos, wPos = playerW) {
-  const feet = pos.y - eyeHeight;
-  let bestTop = null;
-
-  for (const { box, wCenter = 0, wHalf = Infinity } of obstacles) {
-    if (Number.isFinite(wHalf) && Math.abs(wPos - wCenter) > wHalf + playerRadius) continue;
-    const withinX = pos.x + playerRadius >= box.min.x && pos.x - playerRadius <= box.max.x;
-    const withinZ = pos.z + playerRadius >= box.min.z && pos.z - playerRadius <= box.max.z;
-    if (!withinX || !withinZ) continue;
-
-    const top = box.max.y;
-    const diff = top - feet;
-    if (diff >= 0 && diff <= stepHeight) {
-      bestTop = bestTop === null ? top : Math.max(bestTop, top);
-    }
-  }
-
-  if (bestTop !== null) {
-    pos.y = bestTop + eyeHeight;
-    velocityY = 0;
-    onGround = true;
-    return true;
-  }
-  return false;
-}
-
-function startDash(direction, { fromClimb = false } = {}) {
-  if (!playing || dashCooldownRemaining > 0) return;
-  if (stamina <= 0 || !spendStamina(dashStaminaCost)) return;
-  const dir = direction.clone();
-  dir.y = 0;
-  if (dir.lengthSq() === 0) return;
-  dashVector.copy(dir.normalize().multiplyScalar(dashSpeed));
-  dashTimeRemaining = dashDuration;
-  dashCooldownRemaining = dashCooldown;
-  if (fromClimb) {
-    velocityY = Math.max(velocityY, climbDashVerticalBoost);
-    onGround = false;
-  }
-  climbing = false;
-}
-
 function updatePlayer(dt) {
-  staminaUsedThisFrame = false;
-  if (!playing) {
-    regenerateStamina(dt);
-    return;
-  }
-  wallJumpCooldownRemaining = Math.max(0, wallJumpCooldownRemaining - dt);
-  dashCooldownRemaining = Math.max(0, dashCooldownRemaining - dt);
-  dashTimeRemaining = Math.max(0, dashTimeRemaining - dt);
-
-  const now = performance.now();
-  const holdDuration = shiftHeld ? now - shiftDownTime : 0;
-  sprinting = shiftHeld && holdDuration > dashTapThreshold && onGround && stamina > 0;
-
-  const dashActive = dashTimeRemaining > 0;
-  const accel = sprinting ? moveAcceleration * sprintAccelMultiplier : moveAcceleration;
-  const maxSpeed = sprinting ? maxMoveSpeed * sprintSpeedMultiplier : maxMoveSpeed;
-  const next = controls.getObject().position.clone();
-  let nextW = playerW;
-  const { moveDir, inputX, inputZ } = getInputDirection();
-  const wInput =
-    (fourthMove.positive || wSwipeMove.positive ? 1 : 0) -
-    (fourthMove.negative || wSwipeMove.negative ? 1 : 0);
-  const climbSurface = climbHeld ? findClimbableSurface(next, nextW) : null;
-  const wantsClimb = Boolean(climbSurface && climbHeld && stamina > 0);
-
-  if (!wantsClimb && climbing) {
-    climbing = false;
-  } else if (wantsClimb) {
-    climbing = true;
-  }
-
-  if (climbing) {
-    dashTimeRemaining = 0;
-    dashVector.set(0, 0, 0);
-    sprinting = false;
-  }
-
-  if (dashActive) {
-    moveVelocity.copy(dashVector);
-  } else if (!climbing && (inputX !== 0 || inputZ !== 0)) {
-    const accelVec = moveDir.clone().multiplyScalar(accel * dt);
-    moveVelocity.add(accelVec);
-  }
-
-  const dampingValue = dashActive ? 0 : onGround ? groundFriction : airFriction;
-  const dampingFactor = Math.max(0, 1 - dampingValue * dt);
-  moveVelocity.multiplyScalar(dampingFactor);
-
-  const wDampingValue = onGround ? groundFriction : airFriction;
-  const wDampingFactor = Math.max(0, 1 - wDampingValue * dt);
-  if (wInput !== 0) {
-    fourthVelocity += wInput * fourthMoveAcceleration * dt;
-  }
-  fourthVelocity *= wDampingFactor;
-  if (Math.abs(fourthVelocity) > maxFourthMoveSpeed) {
-    fourthVelocity = Math.sign(fourthVelocity) * maxFourthMoveSpeed;
-  }
-
-  if (!dashActive && moveVelocity.lengthSq() > maxSpeed * maxSpeed) {
-    moveVelocity.normalize().multiplyScalar(maxSpeed);
-  }
-
-  nextW += fourthVelocity * dt;
-
-  if (climbing) {
-    moveVelocity.set(0, 0, 0);
-  }
-
-  // Horizontal movement with simple axis separation against obstacles.
-  const horizontalMove = moveVelocity.clone().multiplyScalar(dt);
-  if (horizontalMove.lengthSq() > 0) {
-    const target = next.clone().add(horizontalMove);
-    if (collides(target, playerRadius, nextW)) {
-      const xOnly = next.clone().add(new Vector3(horizontalMove.x, 0, 0));
-      const zOnly = next.clone().add(new Vector3(0, 0, horizontalMove.z));
-      const xFree = !collides(xOnly, playerRadius, nextW);
-      const zFree = !collides(zOnly, playerRadius, nextW);
-      if (xFree) next.copy(xOnly);
-      if (zFree) next.copy(zOnly);
-      if (!xFree && !zFree) {
-        moveVelocity.set(0, 0, 0);
-      }
-    } else {
-      next.copy(target);
-    }
-  }
-
-  let activeClimbSurface = climbing ? climbSurface || findClimbableSurface(next, nextW) : null;
-  if (climbing && !activeClimbSurface) {
-    climbing = false;
-  }
-
-  if (climbing && activeClimbSurface) {
-    const climbInput = (moveState.forward ? 1 : 0) - (moveState.backward ? 1 : 0);
-    const climbDir = climbInput !== 0 ? climbInput : isMobile ? 1 : 0;
-    velocityY = climbDir * climbSpeed;
-    clampToClimbSurface(next, activeClimbSurface);
-    onGround = false;
-    drainStamina(climbStaminaRate, dt);
-    if (stamina <= 0) {
-      stamina = 0;
-      staminaDirty = true;
-      climbing = false;
-    }
-  } else {
-    velocityY += gravity * dt;
-  }
-
-  next.y += velocityY * dt;
-
-  const surface = surfaceHeightAt(next.x, next.z, playerRadius, nextW);
-  const supportY = Math.max(surface, baseGroundY);
-  const feet = next.y - eyeHeight;
-  const diff = supportY - feet;
-  onGround = false;
-
-  // Snap to ground/obstacle surfaces when descending and close.
-  if (velocityY <= 0 && diff >= -groundTolerance && diff <= groundSnap) {
-    const minY = supportY + eyeHeight;
-    if (next.y < minY) {
-      next.y = minY;
-      velocityY = 0;
-    }
-    onGround = true;
-  }
-
-  // Safety: never below the base ground.
-  const minBase = baseGroundY + eyeHeight;
-  if (next.y < minBase) {
-    next.y = minBase;
-    velocityY = 0;
-    onGround = true;
-  }
-
-  const overlappedObstacle = resolvePenetration(next, nextW);
-  const steppedUp = overlappedObstacle ? tryStepUp(next, nextW) : false;
-
-  // Final grounding check based on current position and support directly below.
-  const finalSupport = Math.max(surfaceHeightAt(next.x, next.z, playerRadius, nextW), baseGroundY);
-  const finalFeet = next.y - eyeHeight;
-  const finalDiff = finalSupport - finalFeet;
-  if (velocityY <= 0 && finalDiff >= -groundTolerance && finalDiff <= groundSnap) {
-    const clampY = finalSupport + eyeHeight;
-    if (next.y < clampY) {
-      next.y = clampY;
-      velocityY = 0;
-    }
-    onGround = true;
-  } else if (finalDiff > groundSnap) {
-    // Player is above ground with gap; keep falling.
-    onGround = false;
-  }
-
-  if (overlappedObstacle || steppedUp) {
-    onGround = true;
-  }
-
-  if (!onGround) {
-    sprinting = false;
-  }
-
-  if (sprinting && (inputX !== 0 || inputZ !== 0 || moveVelocity.lengthSq() > 0.01)) {
-    drainStamina(sprintStaminaRate, dt);
-    if (stamina <= 0) {
-      sprinting = false;
-      stamina = 0;
-      staminaDirty = true;
-    }
-  }
-
-  // Prevent moving into w-overlap with obstacles.
-  const collidesW = collides(next, playerRadius, nextW);
-  if (collidesW && !collides(next, playerRadius, playerW)) {
-    nextW = playerW;
-    fourthVelocity = 0;
-  }
-
-  controls.getObject().position.copy(next);
-  playerW = nextW;
-  regenerateStamina(dt);
+  player.playing = playing;
+  player.update(dt, { obstacles });
 }
 
 function updatePanorama(dt) {
@@ -837,33 +720,20 @@ function updatePanorama(dt) {
 }
 
 function updateFov(dt) {
-  const targetFov = playing && sprinting ? baseFov + sprintFovBoost : baseFov;
+  const targetFov = playing && player.sprinting ? baseFov + sprintFovBoost : baseFov;
   const t = clamp(dt * fovLerpRate, 0, 1);
   camera.fov = MathUtils.lerp(camera.fov, targetFov, t);
   camera.updateProjectionMatrix();
 }
 
-function resetPlayer(position = defaultSpawn.clone()) {
-  controls.getObject().position.copy(position);
-  controls.getObject().rotation.set(0, Math.PI, 0);
-  velocityY = 0;
-  fourthVelocity = 0;
-  playerW = 0;
-  onGround = true;
-  moveVelocity.set(0, 0, 0);
-  dashTimeRemaining = 0;
-  dashCooldownRemaining = 0;
-  sprinting = false;
-  climbing = false;
-  climbHeld = false;
-  shiftHeld = false;
-  resetStamina();
+function resetPlayer(position = defaultSpawn.position.clone(), rotationY = defaultSpawn.rotationY) {
+  player.resetPlayer(position, rotationY);
 }
 
 function resetFourthMovement() {
-  fourthMove.positive = false;
-  fourthMove.negative = false;
-  fourthVelocity = 0;
+  player.setFourthMove("positive", false);
+  player.setFourthMove("negative", false);
+  player.fourthVelocity = 0;
 }
 
 function saveGame() {
@@ -874,7 +744,7 @@ function saveGame() {
     level: currentLevel,
     position: { x: pos.x, y: pos.y, z: pos.z },
     rotationY: rot.y,
-    w: playerW
+    w: player.getPlayerW()
   };
   localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
   flashHUD("Game saved locally");
@@ -887,9 +757,12 @@ function loadSave() {
     const data = JSON.parse(raw);
     const level = loadLevel(data.level);
     if (!level) return false;
-    resetPlayer(new Vector3(data.position.x, data.position.y, data.position.z));
-    playerW = typeof data.w === "number" ? data.w : 0;
-    controls.getObject().rotation.y = data.rotationY;
+    const rotationY =
+      typeof data.rotationY === "number"
+        ? data.rotationY
+        : getSpawnConfig(level).rotationY;
+    resetPlayer(new Vector3(data.position.x, data.position.y, data.position.z), rotationY);
+    player.playerW = typeof data.w === "number" ? data.w : 0;
     return true;
   } catch (err) {
     console.warn("Unable to load save", err);
@@ -927,9 +800,8 @@ function animate() {
   updatePlayer(dt);
   updateObstacleVisuals();
   updateWOverlay();
-  if (staminaDirty) {
+  if (player.consumeStaminaDirtyFlag()) {
     updateStaminaUI();
-    staminaDirty = false;
   }
   updateFov(dt);
   renderer.render(scene, camera);
@@ -941,6 +813,7 @@ function showPanel(id) {
   document.querySelectorAll(".panel").forEach((panel) => {
     panel.classList.toggle("visible", panel.id === id);
   });
+  updateMobileControlsVisibility();
 }
 
 function hidePanels() {
@@ -976,7 +849,7 @@ function bindButton(element, handler) {
 
 function updateMobileControlsVisibility() {
   if (!mobileControls) return;
-  const shouldShow = isMobile && playing;
+  const shouldShow = isMobile && (playing || activePanel === "settings-menu");
   mobileControls.classList.toggle("hidden", !shouldShow);
   if (!shouldShow) {
     resetTouchMovement();
@@ -1005,11 +878,12 @@ async function lockLandscapeOrientation() {
 function startLevel(levelId) {
   const level = loadLevel(levelId);
   if (!level) return;
-  const spawn = level.spawn ? level.spawn.clone() : defaultSpawn.clone();
-  resetPlayer(spawn);
+  const spawnCfg = getSpawnConfig(level);
+  resetPlayer(spawnCfg.position, spawnCfg.rotationY);
   panoramaActive = false;
   playing = true;
-  moveState.forward = moveState.backward = moveState.left = moveState.right = false;
+  player.playing = true;
+  player.resetInputs();
   resetFourthMovement();
   resetTouchMovement();
   resetLookTouch();
@@ -1027,10 +901,9 @@ function startLevel(levelId) {
 
 function pauseGame() {
   playing = false;
-  moveState.forward = moveState.backward = moveState.left = moveState.right = false;
+  player.playing = false;
+  player.resetInputs();
   resetFourthMovement();
-  climbing = false;
-  climbHeld = false;
   showPanel("main-menu");
   resetTouchMovement();
   resetLookTouch();
@@ -1040,22 +913,21 @@ function pauseGame() {
 
 function quitToMenu() {
   playing = false;
+  player.playing = false;
   controls.unlock();
-  resetFourthMovement();
-  climbing = false;
-  climbHeld = false;
+  player.resetInputs();
+  player.climbing = false;
+  player.setClimbHeld(false);
   enterTitleScreen();
 }
 
 function resetTouchMovement() {
-  touchMove.x = 0;
-  touchMove.z = 0;
+  player.playing = playing;
+  player.resetTouchInput();
   joystickTouchId = null;
-  climbHeld = false;
   resetWSwipe();
-  if (autoSprintActive) {
-    releaseSprint({ allowDash: false });
-  }
+  player.setClimbHeld(false);
+  player.releaseSprint({ allowDash: false });
   if (joystickHandle) {
     joystickHandle.style.transform = "translate(0px, 0px)";
   }
@@ -1080,14 +952,13 @@ function setupJoystickControls() {
     joystickHandle.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
     const normX = dist === 0 ? 0 : offsetX / joystickMaxDistance;
     const normY = dist === 0 ? 0 : offsetY / joystickMaxDistance;
-    touchMove.x = clamp(normX, -1, 1);
-    touchMove.z = clamp(-normY, -1, 1);
+    player.setTouchInput(normX, -normY);
     if (dist >= sprintThreshold) {
-      if (!autoSprintActive) {
-        pressSprint({ auto: true });
+      if (!player.autoSprintActive) {
+        player.pressSprint({ auto: true });
       }
-    } else if (autoSprintActive) {
-      releaseSprint({ allowDash: false });
+    } else if (player.autoSprintActive) {
+      player.releaseSprint({ allowDash: false });
     }
   };
 
@@ -1228,14 +1099,14 @@ function setupMobileButtons() {
         event.preventDefault();
       }
       if (playing) {
-        climbHeld = true;
+        player.setClimbHeld(true);
       }
     };
     const stopClimb = (event) => {
       if (event && typeof event.preventDefault === "function") {
         event.preventDefault();
       }
-      climbHeld = false;
+      player.setClimbHeld(false);
     };
     mobileClimbBtn.addEventListener("touchstart", startClimb, { passive: false });
     mobileClimbBtn.addEventListener("mousedown", startClimb);
@@ -1249,9 +1120,9 @@ function setupMobileButtons() {
       if (event && typeof event.preventDefault === "function") {
         event.preventDefault();
       }
-      const { moveDir, forward } = getInputDirection();
+      const { moveDir, forward } = player.getInputDirection();
       const dashDir = moveDir.lengthSq() > 0 ? moveDir : forward;
-      startDash(dashDir, { fromClimb: climbing });
+      player.startDash(dashDir, { fromClimb: player.climbing });
     };
     mobileDashBtn.addEventListener("touchstart", triggerDash, { passive: false });
     mobileDashBtn.addEventListener("mousedown", triggerDash);
@@ -1260,7 +1131,7 @@ function setupMobileButtons() {
   if (mobileJumpBtn) {
     const doJump = (event) => {
       event.preventDefault();
-      attemptJump();
+      player.attemptJump();
     };
     mobileJumpBtn.addEventListener("touchstart", doJump, { passive: false });
     mobileJumpBtn.addEventListener("mousedown", doJump);
@@ -1285,34 +1156,15 @@ function initMobileControls() {
   updateOrientationOverlay();
 }
 
-function pressSprint({ auto = false } = {}) {
-  if (auto) {
-    autoSprintActive = true;
-  }
-  if (!shiftHeld) {
-    shiftHeld = true;
-    shiftDownTime = performance.now();
-  }
-}
-
-function releaseSprint({ allowDash = true } = {}) {
-  const heldMs = shiftHeld ? performance.now() - shiftDownTime : 0;
-  const shouldDash = allowDash && !autoSprintActive && heldMs <= dashTapThreshold;
-  if (playing && shouldDash) {
-    const { moveDir, forward } = getInputDirection();
-    const dashDir = moveDir.lengthSq() > 0 ? moveDir : forward;
-    startDash(dashDir, { fromClimb: climbing });
-  }
-  shiftHeld = false;
-  sprinting = false;
-  autoSprintActive = false;
-}
-
 if (levelBtn) {
   bindButton(levelBtn, () => {
     levelMenuReturn = "main-menu";
     showPanel("level-menu");
   });
+}
+
+if (settingsBtn) {
+  bindButton(settingsBtn, () => openSettings("main-menu"));
 }
 
 if (backBtn) {
@@ -1325,6 +1177,7 @@ if (resumeBtn) {
   bindButton(resumeBtn, () => {
     if (currentLevel) {
       playing = true;
+      player.playing = true;
       hidePanels();
       updateMobileControlsVisibility();
       updateOrientationOverlay();
@@ -1360,86 +1213,104 @@ if (titleLevelBtn) {
   });
 }
 
+if (titleSettingsBtn) {
+  bindButton(titleSettingsBtn, () => openSettings("title-menu"));
+}
+
+if (settingsBackBtn) {
+  bindButton(settingsBackBtn, () => closeSettings(false));
+}
+
+if (settingsSaveBtn) {
+  bindButton(settingsSaveBtn, () => {
+    closeSettings(true);
+  });
+}
+
+if (settingsResetBtn) {
+  bindButton(settingsResetBtn, () => {
+    resetSettingsToDefault();
+  });
+}
+
+if (sensitivitySlider) {
+  sensitivitySlider.addEventListener("input", (event) => {
+    const value = Number.parseFloat(event.target.value) || 1;
+    settingsDraft.sensitivity = value;
+    applySensitivity(settingsDraft.sensitivity);
+  });
+}
+
 document.addEventListener("keydown", (e) => {
-  switch (e.code) {
-    case "KeyW":
-      moveState.forward = true;
-      if (playing) e.preventDefault();
-      break;
-    case "KeyS":
-      moveState.backward = true;
-      if (playing) e.preventDefault();
-      break;
-    case "KeyA":
-      moveState.left = true;
-      if (playing) e.preventDefault();
-      break;
-    case "KeyD":
-      moveState.right = true;
-      if (playing) e.preventDefault();
-      break;
-    case "KeyE":
-      climbHeld = true;
-      if (playing) e.preventDefault();
-      break;
-    case "ArrowUp":
-    case "ArrowRight":
-      fourthMove.positive = true;
-      if (playing) e.preventDefault();
-      break;
-    case "ArrowDown":
-    case "ArrowLeft":
-      fourthMove.negative = true;
-      if (playing) e.preventDefault();
-      break;
-    case "ShiftLeft":
-    case "ShiftRight":
-      pressSprint();
-      break;
-    case "Space":
-      if (playing) {
-        attemptJump();
-        e.preventDefault();
-      }
-      break;
-    case "KeyV":
-      showWOverlay = !showWOverlay;
-      updateWOverlay();
-      break;
+  if (handlePendingRebind(e)) return;
+  if (isKeyForAction("forward", e.code)) {
+    player.setMoveState("forward", true);
+    if (playing) e.preventDefault();
+  }
+  if (isKeyForAction("backward", e.code)) {
+    player.setMoveState("backward", true);
+    if (playing) e.preventDefault();
+  }
+  if (isKeyForAction("left", e.code)) {
+    player.setMoveState("left", true);
+    if (playing) e.preventDefault();
+  }
+  if (isKeyForAction("right", e.code)) {
+    player.setMoveState("right", true);
+    if (playing) e.preventDefault();
+  }
+  if (isKeyForAction("climb", e.code)) {
+    player.setClimbHeld(true);
+    if (playing) e.preventDefault();
+  }
+  if (isKeyForAction("wPositive", e.code)) {
+    player.setFourthMove("positive", true);
+    if (playing) e.preventDefault();
+  }
+  if (isKeyForAction("wNegative", e.code)) {
+    player.setFourthMove("negative", true);
+    if (playing) e.preventDefault();
+  }
+  if (isKeyForAction("sprint", e.code)) {
+    player.pressSprint();
+  }
+  if (isKeyForAction("jump", e.code)) {
+    if (playing) {
+      player.attemptJump();
+      e.preventDefault();
+    }
+  }
+  if (isKeyForAction("toggleWOverlay", e.code) && !e.repeat) {
+    showWOverlay = !showWOverlay;
+    updateWOverlay();
   }
 });
 
 document.addEventListener("keyup", (e) => {
-  switch (e.code) {
-    case "KeyW":
-      moveState.forward = false;
-      break;
-    case "KeyS":
-      moveState.backward = false;
-      break;
-    case "KeyA":
-      moveState.left = false;
-      break;
-    case "KeyD":
-      moveState.right = false;
-      break;
-    case "KeyE":
-      climbHeld = false;
-      climbing = false;
-      break;
-    case "ArrowUp":
-    case "ArrowRight":
-      fourthMove.positive = false;
-      break;
-    case "ArrowDown":
-    case "ArrowLeft":
-      fourthMove.negative = false;
-      break;
-    case "ShiftLeft":
-    case "ShiftRight": {
-      releaseSprint();
-      break;
-    }
+  if (handlePendingRebind(e)) return;
+  if (isKeyForAction("forward", e.code)) {
+    player.setMoveState("forward", false);
+  }
+  if (isKeyForAction("backward", e.code)) {
+    player.setMoveState("backward", false);
+  }
+  if (isKeyForAction("left", e.code)) {
+    player.setMoveState("left", false);
+  }
+  if (isKeyForAction("right", e.code)) {
+    player.setMoveState("right", false);
+  }
+  if (isKeyForAction("climb", e.code)) {
+    player.setClimbHeld(false);
+  }
+  if (isKeyForAction("wPositive", e.code)) {
+    player.setFourthMove("positive", false);
+  }
+  if (isKeyForAction("wNegative", e.code)) {
+    player.setFourthMove("negative", false);
+  }
+  if (isKeyForAction("sprint", e.code)) {
+    player.releaseSprint();
   }
 });
 
@@ -1470,6 +1341,10 @@ window.addEventListener("orientationchange", () => {
 });
 
 createFloor();
+settings = loadSettings();
+settingsDraft = cloneSettings(settings);
+applySensitivity(settings.sensitivity);
+applyMobileLayout(settings.mobileLayout);
 initMobileControls();
 resizeRenderer();
 animate();
