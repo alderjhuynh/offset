@@ -23,6 +23,10 @@ body {
   position: relative;
 }
 
+.hidden {
+  display: none !important;
+}
+
 #ui {
   position: absolute;
   inset: 0;
@@ -38,6 +42,8 @@ body {
   border-radius: 14px;
   padding: 28px;
   width: min(420px, 90%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
   text-align: center;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
   opacity: 0;
@@ -97,6 +103,84 @@ button.ghost {
   border: 1px solid rgba(148, 163, 184, 0.3);
 }
 
+.settings-group {
+  text-align: left;
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.6);
+}
+
+.settings-group label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.setting-value {
+  font-size: 13px;
+  color: #a5b4fc;
+}
+
+.setting-note {
+  font-size: 13px;
+  color: #cbd5e1;
+  margin-bottom: 10px;
+}
+
+.setting-list {
+  display: grid;
+  gap: 10px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.setting-row .label {
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.keybind-btn {
+  min-width: 120px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.layout-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.layout-controls input[type="number"] {
+  width: 90px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(0, 0, 0, 0.25);
+  color: #e2e8f0;
+}
+
+.settings-actions {
+  margin-top: 16px;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: #a46be2;
+}
+
 .hint {
   margin-top: 14px;
   color: #94a3b8;
@@ -130,6 +214,7 @@ button.ghost {
   pointer-events: auto;
   touch-action: none;
   backdrop-filter: blur(6px);
+  transform: translate(var(--offset-x, 0px), var(--offset-y, 0px));
 }
 
 #joystick-handle {
@@ -152,6 +237,7 @@ button.ghost {
   pointer-events: auto;
   position: absolute;
   overflow: visible;
+  transform: translate(var(--offset-x, 0px), var(--offset-y, 0px));
 }
 
 .mobile-btn {
@@ -163,6 +249,7 @@ button.ghost {
   border-radius: 12px;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
   backdrop-filter: blur(6px);
+  transform: translate(var(--offset-x, 0px), var(--offset-y, 0px));
 }
 
 #mobile-jump {
@@ -174,6 +261,7 @@ button.ghost {
   min-width: 130px;
   padding: 0;
   border-radius: 18px;
+  transform: translate(var(--offset-x, 0px), var(--offset-y, 0px));
 }
 
 #mobile-dash {
@@ -185,6 +273,7 @@ button.ghost {
   min-width: 96px;
   padding: 0;
   border-radius: 16px;
+  transform: translate(var(--offset-x, 0px), var(--offset-y, 0px));
 }
 
 #mobile-climb {
@@ -196,6 +285,7 @@ button.ghost {
   min-width: 96px;
   padding: 0;
   border-radius: 16px;
+  transform: translate(var(--offset-x, 0px), var(--offset-y, 0px));
 }
 
 #look-zone {
@@ -206,6 +296,7 @@ button.ghost {
   left: 45%;
   pointer-events: auto;
   touch-action: none;
+  transform: translate(var(--offset-x, 0px), var(--offset-y, 0px));
 }
 
 #mobile-pause {
@@ -222,6 +313,7 @@ button.ghost {
   background: rgba(255, 255, 255, 0.14);
   border: 1px solid rgba(148, 163, 184, 0.45);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+  transform: translate(var(--offset-x, 0px), var(--offset-y, 0px));
 }
 
 #orientation-overlay {
