@@ -552,6 +552,7 @@ function syncSettingsVisibility() {
   const showMobile = isMobile && mobileLayoutSettings;
   if (desktopKeybinds) desktopKeybinds.classList.toggle("hidden", !showDesktop);
   if (mobileLayoutSettings) mobileLayoutSettings.classList.toggle("hidden", !showMobile);
+  settingsPanel.classList.toggle("mobile-open", isMobile);
 }
 
 function syncSettingsUI() {
