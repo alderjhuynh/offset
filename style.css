@@ -34,6 +34,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 4;
 }
 
 .panel {
@@ -50,6 +51,7 @@ body {
   transform: translateY(12px);
   transition: opacity 200ms ease, transform 200ms ease;
   pointer-events: none;
+  z-index: 5;
 }
 
 .panel.visible {
@@ -197,6 +199,10 @@ input[type="range"] {
 
 #mobile-controls.hidden {
   display: none;
+}
+
+#settings-menu.mobile-open {
+  max-height: calc(100vh - 32px);
 }
 
 #joystick {
