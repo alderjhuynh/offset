@@ -54,6 +54,7 @@ export class PlayerController {
   wallJumpUpStrength = 11;
   wallJumpPushStrength = 9;
   wallJumpCooldown = 0.25;
+  wallJumpGrace = 0.16;
   staminaMax = 100;
   staminaRegenRate = 26;
   staminaRegenDelay = 0.6;
@@ -80,6 +81,7 @@ export class PlayerController {
   staminaUsedThisFrame = false;
   staminaDirty = true;
   wallJumpCooldownRemaining = 0;
+  climbReleaseGrace = 0;
   dashVector = new Vector3();
   autoSprintActive = false;
 
@@ -446,7 +448,9 @@ export class PlayerController {
       this.onGround = false;
       return;
     }
-    if (!this.climbing || this.wallJumpCooldownRemaining > 0) return;
+    const canWallJump =
+      (this.climbing || this.climbReleaseGrace > 0) && this.wallJumpCooldownRemaining <= 0;
+    if (!canWallJump) return;
     const surface = this.findClimbableSurface(this.controls.getObject().position);
     if (surface) {
       const push = surface.normal.clone().multiplyScalar(this.wallJumpPushStrength);
@@ -456,6 +460,7 @@ export class PlayerController {
       this.climbing = false;
       this.climbHeld = false;
       this.wallJumpCooldownRemaining = this.wallJumpCooldown;
+      this.climbReleaseGrace = 0;
     }
   }
 
@@ -486,6 +491,7 @@ export class PlayerController {
       return;
     }
     this.wallJumpCooldownRemaining = Math.max(0, this.wallJumpCooldownRemaining - dt);
+    this.climbReleaseGrace = Math.max(0, this.climbReleaseGrace - dt);
     this.dashCooldownRemaining = Math.max(0, this.dashCooldownRemaining - dt);
     this.dashTimeRemaining = Math.max(0, this.dashTimeRemaining - dt);
 
@@ -508,8 +514,12 @@ export class PlayerController {
 
     if (!wantsClimb && this.climbing) {
       this.climbing = false;
+      if (this.isMobile) {
+        this.climbReleaseGrace = this.wallJumpGrace;
+      }
     } else if (wantsClimb) {
       this.climbing = true;
+      this.climbReleaseGrace = this.wallJumpGrace;
     }
 
     if (this.climbing) {
