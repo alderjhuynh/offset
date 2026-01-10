@@ -18,17 +18,19 @@
   <div id="ui">
     <div id="title-menu" class="panel visible">
       <h1>Offset</h1>
-      <p class="subtitle">this is supposed to be a proof of concept</p>
+      <p class="subtitle">this game is designed to ragebait one specific person</p>
       <div class="buttons">
         <button id="title-level-btn">Level Select</button>
+        <button id="title-settings-btn" class="ghost">Settings</button>
       </div>
-      <p class="hint">like, hopefully this isn't the final project</p>
+      <p class="hint">if you're not that person, then it should be fine</p>
     </div>
 
     <div id="main-menu" class="panel">
       <h2>Paused</h2>
       <div class="buttons">
         <button id="level-btn">Level Select</button>
+        <button id="settings-btn">Settings</button>
         <button id="resume-btn" class="ghost">Resume</button>
         <button id="quit-btn" class="ghost">Quit to Menu</button>
       </div>
@@ -39,6 +41,30 @@
       <div class="buttons" id="level-options"></div>
       <div class="buttons">
         <button id="back-btn" class="ghost">Back</button>
+      </div>
+    </div>
+
+    <div id="settings-menu" class="panel">
+      <h2>Settings</h2>
+      <div class="settings-group">
+        <label for="sensitivity-slider">
+          Camera Sensitivity
+          <span id="sensitivity-value" class="setting-value"></span>
+        </label>
+        <input id="sensitivity-slider" type="range" min="0.4" max="2.4" step="0.05">
+      </div>
+      <div id="desktop-keybinds" class="settings-group hidden">
+        <div class="setting-note">Tap a control to change it, then press any key.</div>
+        <div id="keybind-list" class="setting-list"></div>
+      </div>
+      <div id="mobile-layout" class="settings-group hidden">
+        <div class="setting-note">Adjust each control position (pixels). Values apply instantly.</div>
+        <div id="layout-list" class="setting-list"></div>
+      </div>
+      <div class="buttons settings-actions">
+        <button id="settings-save-btn">Save</button>
+        <button id="settings-reset-btn" class="ghost">Reset to Defaults</button>
+        <button id="settings-back-btn" class="ghost">Back</button>
       </div>
     </div>
 
